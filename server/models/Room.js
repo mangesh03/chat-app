@@ -11,6 +11,11 @@ const roomSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    type: {
+        type: String,
+        enum: ['group', 'direct'],
+        default: 'group'
+    },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',

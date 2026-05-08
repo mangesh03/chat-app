@@ -12,6 +12,7 @@ const Chat = () => {
   const { socket } = useSocket()
 
   const [rooms, setRooms] = useState([])
+  const [users, setUsers] = useState([])
   const [currentRoom, setCurrentRoom] = useState(null)
   const [messages, setMessages] = useState([])
   const [typingUser, setTypingUser] = useState(null)
@@ -20,28 +21,65 @@ const Chat = () => {
   const [showSidebar, setShowSidebar] = useState(true)
 
   useEffect(() => {
-    const fetchRooms = async () => {
+    const fetchData = async () => {
       try {
-        const { data } = await API.get('/rooms')
-        setRooms(data)
+        const [roomsRes, usersRes] = await Promise.all([
+          API.get('/rooms'),
+          API.get('/rooms/users/list')
+        ])
+        setRooms(roomsRes.data)
+        setUsers(usersRes.data)
       } catch (err) {
-        toast.error('Failed to load rooms')
+        toast.error('Failed to load data')
       }
     }
-    fetchRooms()
+    fetchData()
+
+    const interval = setInterval(async () => {
+      try {
+        const { data } = await API.get('/rooms/users/list')
+        setUsers(data)
+      } catch (err) { }
+    }, 30000)
+
+    return () => clearInterval(interval)
   }, [])
 
   useEffect(() => {
     if (!socket) return
 
     socket.on('receive-message', (message) => {
-      setMessages((prev) => [...prev, message])
-      if (message.sender?.name !== user?.name) {
-        setUnreadCounts((prev) => ({
-          ...prev,
-          [message.room]: (prev[message.room] || 0) + 1
-        }))
-        toast(`${message.sender?.name}: ${message.content}`, { icon: '💬' })
+      // Only show in chat window if message belongs to current room
+      setMessages((prev) => {
+        if (currentRoom && message.room === currentRoom._id) {
+          return [...prev, message]
+        }
+        return prev
+      })
+
+      // Don't count own messages
+      if (message.sender?.name === user?.name) return
+
+      // Show badge and toast only if NOT in that room right now
+      const isCurrentRoom = currentRoom?._id === message.room
+      if (!isCurrentRoom) {
+        // For DM — also add badge on sender's user ID
+        // For group — badge on room ID
+        setUnreadCounts((prev) => {
+          const newCounts = {
+            ...prev,
+            [message.room]: (prev[message.room] || 0) + 1  // group room badge
+          }
+          // Also add badge on sender ID for DM list
+          if (message.sender?._id) {
+            newCounts[message.sender._id] = (prev[message.sender._id] || 0) + 1
+          }
+          return newCounts
+        })
+
+        toast(`💬 ${message.sender?.name}: ${message.content}`, {
+          duration: 4000
+        })
       }
     })
 
@@ -54,7 +92,7 @@ const Chat = () => {
     socket.on('user-online', ({ userName, onlineUsers }) => {
       setOnlineUsers(onlineUsers)
       if (userName && userName !== user?.name) {
-        toast(`${userName} joined`, { icon: '🟢' })
+        toast(`🟢 ${userName} is online`)
       }
     })
 
@@ -69,14 +107,19 @@ const Chat = () => {
       socket.off('user-online')
       socket.off('user-offline')
     }
-  }, [socket, user])
+  }, [socket, user, currentRoom])
 
   const handleRoomSelect = async (room) => {
     setCurrentRoom(room)
     setMessages([])
     setTypingUser(null)
-    setUnreadCounts((prev) => ({ ...prev, [room._id]: 0 }))
     setShowSidebar(false)
+
+    // Clear room badge
+    setUnreadCounts((prev) => ({
+      ...prev,
+      [room._id]: 0
+    }))
 
     socket.emit('join-room', {
       roomId: room._id,
@@ -89,6 +132,22 @@ const Chat = () => {
       setMessages(data)
     } catch (err) {
       toast.error('Failed to load messages')
+    }
+  }
+
+  const handleDMSelect = async (selectedUser) => {
+    try {
+      const { data } = await API.post(`/rooms/dm/${selectedUser._id}`)
+
+      // Clear unread badge for this user when opening DM
+      setUnreadCounts((prev) => ({
+        ...prev,
+        [selectedUser._id]: 0
+      }))
+
+      handleRoomSelect(data)
+    } catch (err) {
+      toast.error('Failed to open DM')
     }
   }
 
@@ -108,13 +167,26 @@ const Chat = () => {
     }
   }
 
+  const getRoomDisplayName = () => {
+    if (!currentRoom) return ''
+    if (currentRoom.type === 'direct') {
+      const otherUser = users.find(u =>
+        currentRoom.name?.includes(u.name)
+      )
+      return `@ ${otherUser?.name || currentRoom.name}`
+    }
+    return `# ${currentRoom.name}`
+  }
+
   return (
     <div className="flex h-screen bg-white overflow-hidden">
       <div className={`${showSidebar ? 'flex' : 'hidden'} md:flex`}>
         <Sidebar
           rooms={rooms}
+          users={users}
           currentRoom={currentRoom}
           onRoomSelect={handleRoomSelect}
+          onDMSelect={handleDMSelect}
           onCreateRoom={handleCreateRoom}
           onlineUsers={onlineUsers}
           unreadCounts={unreadCounts}
@@ -132,8 +204,14 @@ const Chat = () => {
           {currentRoom ? (
             <div className="flex-1 flex items-center justify-between">
               <div>
-                <h2 className="font-semibold text-gray-800"># {currentRoom.name}</h2>
-                <p className="text-xs text-gray-500">{currentRoom.description || 'No description'}</p>
+                <h2 className="font-semibold text-gray-800">
+                  {getRoomDisplayName()}
+                </h2>
+                <p className="text-xs text-gray-500">
+                  {currentRoom.type === 'direct'
+                    ? 'Direct Message'
+                    : currentRoom.description || 'No description'}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
