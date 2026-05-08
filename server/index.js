@@ -17,7 +17,7 @@ const server = http.createServer(app)
 
 const allowedOrigins = [
     'http://localhost:5173',
-    'https://chat-app-kohl-seven-65.vercel.app',
+    'https://mangesh-chat-app-kohl-seven-65.vercel.app',
     /\.vercel\.app$/
 ]
 
