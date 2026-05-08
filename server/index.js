@@ -21,7 +21,25 @@ const io = new Server(server, {
     }
 })
 
-app.use(cors())
+app.use(cors({
+    origin: [
+        'http://localhost:5173',
+        'https://chat-app-mm5s.vercel.app',  // we'll update this after Vercel deploy
+        /\.vercel\.app$/  // allows any vercel subdomain
+    ],
+    credentials: true
+}))
+
+const io = new Server(server, {
+    cors: {
+        origin: [
+            'http://localhost:5173',
+            /\.vercel\.app$/
+        ],
+        methods: ['GET', 'POST']
+    }
+})
+
 app.use(express.json())
 
 app.use('/api/auth', require('./routes/auth'))
